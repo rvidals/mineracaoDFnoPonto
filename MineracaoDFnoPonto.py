@@ -1,98 +1,106 @@
-import requests 
+import requests
 import pandas as pd
 from datetime import datetime
-import time 
+import time
+import certifi
+import os
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-"""
- @name
-      COEA/DEPAT/IPEDF
- 
- @description
-     Devido a necessidade de montar uma base de dados com as principais informações das operadoras de ônibus que atuam no 
-     transporte urbano do Distrito Federal, presente no site https://dfnoponto.semob.df.gov.br/veiculos/onlineMap.html,
-     foi desenvolvido este scrpit em Python 3.7.6, que realiza a mineração de dados da api das operadoras 
-     https://www.sistemas.dftrans.df.gov.br/service/gps/operacoes e salva em um arquivo de texto em formato csv que será
-     lido por um SIG. 
-
- @author
-      Rogerio Vidal de Siqueira
- 
- @contact
-      rogerio.siqueira@ipe.df.gov.br
- 
- @version
-      1.0.0 - Mineração de dados da API presente no DFnoPonto.
- 
-"""
+# Cria a pasta 'dados' se não existir
+os.makedirs("dados", exist_ok=True)
 
 def get_operacaoDFTRANS_API():
-    r = requests.get('https://www.sistemas.dftrans.df.gov.br/service/gps/operacoes').json()
+    url = 'https://www.sistemas.dftrans.df.gov.br/service/gps/operacoes'
+    try:
+        # Tenta com verificação SSL
+        response = requests.get(url, verify=certifi.where(), timeout=10)
+        response.raise_for_status()
+    except requests.exceptions.SSLError:
+        print("⚠️ Tentando novamente sem verificação SSL")
+        try:
+            response = requests.get(url, verify=False, timeout=10)
+            response.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            print("❌ Falha ao acessar mesmo sem SSL:", e)
+            return pd.DataFrame()
+    except requests.exceptions.RequestException as e:
+        print("❌ Erro na requisição:", e)
+        return pd.DataFrame()
 
+    data = response.json()
     lista_df = []
-    for i in range(len(r)):
-      id = r[i]['operadora']['id']
-      nome = r[i]['operadora']['nome']
-      sigla = r[i]['operadora']['sigla']
-      razaoSocial = r[i]['operadora']['razaoSocial']
-      numero = [r[i]['veiculos'][x]['numero'] for x in range(len(r[i]['veiculos']))]
-      linha = [r[i]['veiculos'][x]['linha'] for x in range(len(r[i]['veiculos']))    ]
-      horario = [r[i]['veiculos'][x]['horario'] for x in range(len(r[i]['veiculos']))    ]
-      lat = [r[i]['veiculos'][x]['localizacao']['latitude'] for x in range(len(r[i]['veiculos']))    ]
-      long = [r[i]['veiculos'][x]['localizacao']['longitude'] for x in range(len(r[i]['veiculos']))    ]
-      try:
-        veloc_uni = [ r[i]['veiculos'][x]['velocidade']['unidade'] for x in range(len(r[i]['veiculos']))    ]
-        veloc_valor = [ r[i]['veiculos'][x]['velocidade']['valor'] for x in range(len(r[i]['veiculos']))    ]
-      except:
-          veloc_uni = None
-          veloc_valor = None
-      codigoImei = [ r[i]['veiculos'][x]['codigoImei'] for x in range(len(r[i]['veiculos']))    ]
-      sentido = [ r[i]['veiculos'][x]['sentido'] for x in range(len(r[i]['veiculos']))    ]
-      direcao = [ r[i]['veiculos'][x]['direcao'] for x in range(len(r[i]['veiculos']))    ]
-      valid = [ r[i]['veiculos'][x]['valid'] for x in range(len(r[i]['veiculos']))    ]
 
-    
-      df = pd.DataFrame({'Id_Operadora':id, 'Nome_Empresa': nome, 'Sigla':sigla ,
-                        'Razao_Social':razaoSocial , 'id_Veiculo':numero, 
-                        'Linha':linha, 'Horario_Operacao':horario, 'Latitude':lat, 
-                        'Longitude':long, 'Velocidade_Unidade':veloc_uni, 'Velocidade_Valor':veloc_valor, 
-                        'CódigoImei':codigoImei, 'Sentido':sentido, 'Direcao':direcao, 'Validade':valid})
-      lista_df.append(df)
+    for operadora in data:
+        id = operadora['operadora']['id']
+        nome = operadora['operadora']['nome']
+        sigla = operadora['operadora']['sigla']
+        razaoSocial = operadora['operadora']['razaoSocial']
+        numero = [v['numero'] for v in operadora['veiculos']]
+        linha = [v['linha'] for v in operadora['veiculos']]
+        horario = [v['horario'] for v in operadora['veiculos']]
+        lat = [v['localizacao']['latitude'] for v in operadora['veiculos']]
+        long = [v['localizacao']['longitude'] for v in operadora['veiculos']]
+        try:
+            veloc_uni = [v['velocidade']['unidade'] for v in operadora['veiculos']]
+            veloc_valor = [v['velocidade']['valor'] for v in operadora['veiculos']]
+        except:
+            veloc_uni = None
+            veloc_valor = None
+        codigoImei = [v['codigoImei'] for v in operadora['veiculos']]
+        sentido = [v['sentido'] for v in operadora['veiculos']]
+        direcao = [v['direcao'] for v in operadora['veiculos']]
+        valid = [v['valid'] for v in operadora['veiculos']]
 
-    df = pd.concat(lista_df) 
-    return df
+        df = pd.DataFrame({
+            'Id_Operadora': id,
+            'Nome_Empresa': nome,
+            'Sigla': sigla,
+            'Razao_Social': razaoSocial,
+            'id_Veiculo': numero,
+            'Linha': linha,
+            'Horario_Operacao': horario,
+            'Latitude': lat,
+            'Longitude': long,
+            'Velocidade_Unidade': veloc_uni,
+            'Velocidade_Valor': veloc_valor,
+            'CódigoImei': codigoImei,
+            'Sentido': sentido,
+            'Direcao': direcao,
+            'Validade': valid
+        })
 
-def salvar_csv(df):
-  df_copy = df.copy()
-  df_copy = df_copy.reset_index() #Resetar index do DF
-  #Transformar horários. No arquivo horiginal está tudo em segundos
-  df_copy['Horario_Operacao'] = pd.to_datetime(df_copy['Horario_Operacao'].astype(str).str[:10], unit='s')
-  #DATA e HORA da extração
-  df_copy['Data_Extracao'] = datetime.now().strftime("%Y-%m-%d")
-  df_copy['Hora_Extracao'] = datetime.now().strftime("%H:%M:%S")
+        lista_df.append(df)
 
-  date = datetime.now().strftime("%Y%m%d%H%M%S")
-  df_copy.to_csv('OperacaoTRANSDF' + date + '.csv', 
-                 index=False, encoding='utf-8')
+    return pd.concat(lista_df)
 
+def salvar_csv(df, coleta_num):
+    df_copy = df.copy()
+    df_copy = df_copy.reset_index(drop=True)
+    df_copy['Horario_Operacao'] = pd.to_datetime(df_copy['Horario_Operacao'].astype(str).str[:10], unit='s')
+    df_copy['Data_Extracao'] = datetime.now().strftime("%Y-%m-%d")
+    df_copy['Hora_Extracao'] = datetime.now().strftime("%H:%M:%S")
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    file_name = f'dados/OperacaoTRANSDF_{timestamp}_coleta{coleta_num}.csv'
+    df_copy.to_csv(file_name, index=False, encoding='utf-8')
+    print(f"✅ Arquivo salvo: {os.path.abspath(file_name)}")
 
 if __name__ == '__main__':
-  #Constantes para interagir no prompt
-  UP = '\033[1A'
-  CLEAR = '\x1b[2K'
+    intervalo_em_minutos = 60  #  2 para testar rapidamente
+    contador = 1
 
-  i = 60 # pode mudar para o intervalo (SEGUNDOS) necessário 
-  j = 1 # Contador que aparecerá no prompt
-  l = []
-  while i>0:
-      time.sleep(60)  #Espaço para fazer a requisição na API
-      df = get_operacaoDFTRANS_API()
-      l.append(df)
-      print(f"60/{j}")
-      print(UP, end=CLEAR)
-      i-=1
-      j+=1
-  df = pd.concat(l) #Concatenar DataFrames
-  
-  salvar_csv(df) #Salvar
+    print("⏳ Iniciando a coleta de dados a cada 60 segundos...\n")
 
-  print("Requisição Salva!!!")
+    while intervalo_em_minutos > 0:
+        time.sleep(60)
+        df = get_operacaoDFTRANS_API()
+        if not df.empty:
+            salvar_csv(df, contador)
+            print(f"✅ Coleta {contador} realizada com sucesso.\n")
+        else:
+            print(f"⚠️ Coleta {contador} retornou dados vazios.\n")
+        intervalo_em_minutos -= 1
+        contador += 1
+
+    print("✅ Fim da execução.")
